@@ -15,4 +15,7 @@ public interface DocumentAclMapper extends BaseMapper<DocumentAcl> {
 
     @Select("select doc_id from document_acl where user_id = #{userId}")
     List<Long> selectDocIdsByUser(@Param("userId") Long userId);
+
+    @Select("select user_id from document_acl where doc_id = #{docId}")
+    List<Long> selectUserIdsByDoc(@Param("docId") Long docId);
 }

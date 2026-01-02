@@ -1,22 +1,22 @@
 package com.example.collab.dto;
 
-import jakarta.validation.constraints.Email;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 
 public class LoginRequest {
-    @Email
     @NotBlank
-    private String email;
+    @JsonAlias("email")
+    private String account;
 
     @NotBlank
     private String password;
 
-    public String getEmail() {
-        return email;
+    public String getAccount() {
+        return account;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setAccount(String account) {
+        this.account = account;
     }
 
     public String getPassword() {

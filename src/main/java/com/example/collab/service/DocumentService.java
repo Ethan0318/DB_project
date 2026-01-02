@@ -6,22 +6,32 @@ import com.example.collab.common.ErrorCode;
 import com.example.collab.dto.DocContentSaveRequest;
 import com.example.collab.dto.DocCreateRequest;
 import com.example.collab.dto.DocUpdateRequest;
+import com.example.collab.entity.DocPermission;
 import com.example.collab.entity.Document;
 import com.example.collab.entity.DocumentAcl;
 import com.example.collab.entity.DocumentContent;
 import com.example.collab.entity.DocumentSnapshot;
-import com.example.collab.entity.DocPermission;
+import com.example.collab.entity.DocumentTemplate;
 import com.example.collab.mapper.DocumentAclMapper;
 import com.example.collab.mapper.DocumentContentMapper;
 import com.example.collab.mapper.DocumentMapper;
 import com.example.collab.mapper.DocumentSnapshotMapper;
+import com.example.collab.mapper.DocumentTemplateMapper;
 import com.example.collab.util.HtmlUtil;
+import com.example.collab.service.NotificationService;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 public class DocumentService {
@@ -30,18 +40,24 @@ public class DocumentService {
     private final DocumentContentMapper documentContentMapper;
     private final DocumentAclMapper documentAclMapper;
     private final DocumentSnapshotMapper documentSnapshotMapper;
+    private final DocumentTemplateMapper documentTemplateMapper;
     private final OpLogService opLogService;
+    private final NotificationService notificationService;
 
     public DocumentService(DocumentMapper documentMapper,
                            DocumentContentMapper documentContentMapper,
                            DocumentAclMapper documentAclMapper,
                            DocumentSnapshotMapper documentSnapshotMapper,
-                           OpLogService opLogService) {
+                           DocumentTemplateMapper documentTemplateMapper,
+                           OpLogService opLogService,
+                           NotificationService notificationService) {
         this.documentMapper = documentMapper;
         this.documentContentMapper = documentContentMapper;
         this.documentAclMapper = documentAclMapper;
         this.documentSnapshotMapper = documentSnapshotMapper;
+        this.documentTemplateMapper = documentTemplateMapper;
         this.opLogService = opLogService;
+        this.notificationService = notificationService;
     }
 
     public Document createDoc(Long userId, DocCreateRequest request) {
@@ -58,7 +74,14 @@ public class DocumentService {
 
         DocumentContent content = new DocumentContent();
         content.setDocId(doc.getId());
-        content.setContent("<p></p>");
+        String initialContent = "<p></p>";
+        if (request.getTemplateId() != null) {
+            DocumentTemplate template = documentTemplateMapper.selectById(request.getTemplateId());
+            if (template != null) {
+                initialContent = template.getContent();
+            }
+        }
+        content.setContent(initialContent);
         content.setUpdatedAt(LocalDateTime.now());
         documentContentMapper.insert(content);
 
@@ -73,7 +96,8 @@ public class DocumentService {
         return doc;
     }
 
-    public List<Document> listDocs(Long userId, boolean isAdmin, String keyword, Long tagId, String sort) {
+    public List<Document> listDocs(Long userId, boolean isAdmin, String keyword, Long tagId, String sort,
+                                   Long authorId, String fromDate, String toDate) {
         QueryWrapper<Document> wrapper = new QueryWrapper<>();
         wrapper.eq("deleted", 0);
         if (!isAdmin) {
@@ -89,8 +113,17 @@ public class DocumentService {
         if (tagId != null) {
             wrapper.eq("tag_id", tagId);
         }
-        if ("updated".equalsIgnoreCase(sort) || sort == null) {
-            wrapper.orderByDesc("updated_at");
+        if (authorId != null) {
+            wrapper.eq("owner_id", authorId);
+        }
+        if (fromDate != null && !fromDate.isBlank()) {
+            wrapper.ge("created_at", LocalDate.parse(fromDate).atStartOfDay());
+        }
+        if (toDate != null && !toDate.isBlank()) {
+            wrapper.le("created_at", LocalDate.parse(toDate).atTime(23, 59, 59));
+        }
+        if ("title".equalsIgnoreCase(sort)) {
+            wrapper.orderByAsc("title");
         } else {
             wrapper.orderByDesc("updated_at");
         }
@@ -140,7 +173,7 @@ public class DocumentService {
         opLogService.log(userId, "DOC_DELETE", "Delete doc " + docId, null);
     }
 
-    public Map<String, Object> saveContent(Long docId, DocContentSaveRequest request) {
+    public Map<String, Object> saveContent(Long docId, DocContentSaveRequest request, Long operatorId) {
         Document doc = documentMapper.selectById(docId);
         if (doc == null || doc.getDeleted() != 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Doc not found");
@@ -161,6 +194,7 @@ public class DocumentService {
         doc.setUpdatedAt(LocalDateTime.now());
         documentMapper.updateById(doc);
         saveSnapshot(docId, request.getContent());
+        notifyEditors(docId, doc.getTitle(), operatorId, request.getClientUpdatedAt());
         Map<String, Object> result = new HashMap<>();
         result.put("updatedAt", content.getUpdatedAt());
         return result;
@@ -202,5 +236,105 @@ public class DocumentService {
         snapshot.setContent(content);
         snapshot.setCreatedAt(LocalDateTime.now());
         documentSnapshotMapper.insert(snapshot);
+    }
+
+    public Document importMarkdown(Long userId, MultipartFile file, Long tagId) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "File is empty");
+        }
+        String title = file.getOriginalFilename();
+        if (title == null || title.isBlank()) {
+            title = "Imported Doc";
+        } else if (title.contains(".")) {
+            title = title.substring(0, title.lastIndexOf('.'));
+        }
+        String md;
+        try {
+            md = new String(file.getBytes());
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "Read file failed");
+        }
+        String html = markdownToHtml(md);
+        DocCreateRequest createRequest = new DocCreateRequest();
+        createRequest.setTitle(title);
+        createRequest.setTagId(tagId);
+        Document doc = createDoc(userId, createRequest);
+        DocumentContent content = documentContentMapper.selectOne(new QueryWrapper<DocumentContent>().eq("doc_id", doc.getId()));
+        content.setContent(html);
+        content.setUpdatedAt(LocalDateTime.now());
+        documentContentMapper.updateById(content);
+        doc.setSearchText(HtmlUtil.stripHtml(html));
+        documentMapper.updateById(doc);
+        return doc;
+    }
+
+    public byte[] exportDoc(Long docId, String format) {
+        DocumentContent content = documentContentMapper.selectOne(new QueryWrapper<DocumentContent>().eq("doc_id", docId));
+        String html = content == null ? "" : content.getContent();
+        if ("markdown".equalsIgnoreCase(format)) {
+            return HtmlUtil.stripHtml(html).getBytes();
+        }
+        return html.getBytes();
+    }
+
+    public byte[] batchExport(Set<Long> docIds, String format) {
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
+             ZipOutputStream zos = new ZipOutputStream(bos)) {
+            for (Long docId : docIds) {
+                Document doc = documentMapper.selectById(docId);
+                if (doc == null) {
+                    continue;
+                }
+                String filename = doc.getTitle().replaceAll("[^a-zA-Z0-9_-]", "_");
+                filename = filename.isBlank() ? "doc_" + docId : filename;
+                if ("markdown".equalsIgnoreCase(format)) {
+                    filename += ".md";
+                } else {
+                    filename += ".html";
+                }
+                zos.putNextEntry(new ZipEntry(filename));
+                zos.write(exportDoc(docId, format));
+                zos.closeEntry();
+            }
+            zos.finish();
+            return bos.toByteArray();
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "Export failed");
+        }
+    }
+
+    private String markdownToHtml(String md) {
+        if (md == null || md.isBlank()) {
+            return "<p></p>";
+        }
+        String[] lines = md.split("\\r?\\n");
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            if (line.startsWith("### ")) {
+                sb.append("<h3>").append(line.substring(4)).append("</h3>");
+            } else if (line.startsWith("## ")) {
+                sb.append("<h2>").append(line.substring(3)).append("</h2>");
+            } else if (line.startsWith("# ")) {
+                sb.append("<h1>").append(line.substring(2)).append("</h1>");
+            } else {
+                sb.append("<p>").append(line).append("</p>");
+            }
+        }
+        return sb.toString();
+    }
+
+    private void notifyEditors(Long docId, String title, Long operatorId, Long clientUpdatedAt) {
+        List<Long> userIds = documentAclMapper.selectUserIdsByDoc(docId);
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+        String payload = "{\"docId\":" + docId + ",\"title\":\"" + title + "\"}";
+        Set<Long> unique = new HashSet<>(userIds);
+        for (Long uid : unique) {
+            if (operatorId != null && operatorId.equals(uid)) {
+                continue;
+            }
+            notificationService.notifyUser(uid, "DOC_EDIT", payload, clientUpdatedAt);
+        }
     }
 }

@@ -2,8 +2,9 @@ package com.example.collab.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.collab.entity.Comment;
-import com.example.collab.entity.Notification;
+import com.example.collab.entity.Document;
 import com.example.collab.mapper.CommentMapper;
+import com.example.collab.mapper.DocumentMapper;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -14,10 +15,12 @@ public class CommentService {
 
     private final CommentMapper commentMapper;
     private final NotificationService notificationService;
+    private final DocumentMapper documentMapper;
 
-    public CommentService(CommentMapper commentMapper, NotificationService notificationService) {
+    public CommentService(CommentMapper commentMapper, NotificationService notificationService, DocumentMapper documentMapper) {
         this.commentMapper = commentMapper;
         this.notificationService = notificationService;
+        this.documentMapper = documentMapper;
     }
 
     public Comment create(Long docId, Long userId, String content, String anchor, Long parentId, Long atUserId) {
@@ -41,6 +44,11 @@ public class CommentService {
                 notificationService.notifyUser(parent.getUserId(), "REPLY",
                         "{\"docId\":" + docId + ",\"commentId\":" + comment.getId() + "}");
             }
+        }
+        Document document = documentMapper.selectById(docId);
+        if (document != null && document.getOwnerId() != null && !document.getOwnerId().equals(userId)) {
+            notificationService.notifyUser(document.getOwnerId(), "COMMENT",
+                    "{\"docId\":" + docId + ",\"commentId\":" + comment.getId() + "}");
         }
         return comment;
     }

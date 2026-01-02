@@ -35,15 +35,21 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 Claims claims = jwtUtil.parseToken(token);
                 Long userId = Long.valueOf(claims.getSubject());
                 String email = claims.get("email", String.class);
-                List<String> roles = claims.get("roles", List.class);
-                List<SimpleGrantedAuthority> authorities = roles == null ? List.of() :
-                        roles.stream().map(r -> new SimpleGrantedAuthority("ROLE_" + r)).collect(Collectors.toList());
+                Object roleObj = claims.get("roles");
+                List<String> roles = roleObj instanceof List<?> list
+                        ? list.stream().map(String::valueOf).collect(Collectors.toList())
+                        : List.of();
+                List<SimpleGrantedAuthority> authorities = roles.stream()
+                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                        .collect(Collectors.toList());
                 UserPrincipal principal = new UserPrincipal(userId, email, roles);
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(principal, null, authorities);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
                 SecurityContextHolder.clearContext();
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid or expired token");
+                return;
             }
         }
         filterChain.doFilter(request, response);

@@ -2,6 +2,8 @@ import { useNotificationStore } from '@/stores/notification'
 import { useAuthStore } from '@/stores/auth'
 
 let socket: WebSocket | null = null
+const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+const wsBase = (import.meta.env.VITE_WS_BASE || apiBase).replace(/^http/, 'ws')
 
 export const useNotifySocket = () => {
   const notificationStore = useNotificationStore()
@@ -10,7 +12,7 @@ export const useNotifySocket = () => {
   const connect = () => {
     if (!auth.token) return
     if (socket && socket.readyState === WebSocket.OPEN) return
-    const wsUrl = (import.meta.env.VITE_WS_BASE || 'ws://localhost:8080') + `/ws?token=${auth.token}`
+    const wsUrl = `${wsBase}/ws?token=${auth.token}`
     socket = new WebSocket(wsUrl)
     socket.onmessage = (event) => {
       const msg = JSON.parse(event.data)
@@ -22,6 +24,9 @@ export const useNotifySocket = () => {
           readFlag: 0,
           createdAt: msg.payload.createdAt
         })
+        if (msg.payload.type === 'DOC_SHARE') {
+          window.dispatchEvent(new CustomEvent('doc-shared', { detail: msg.payload }))
+        }
       }
     }
     socket.onclose = () => {

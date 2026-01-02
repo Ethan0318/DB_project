@@ -10,6 +10,8 @@ public class DocCreateRequest {
 
     private Long tagId;
 
+    private Long templateId;
+
     public String getTitle() {
         return title;
     }
@@ -24,5 +26,13 @@ public class DocCreateRequest {
 
     public void setTagId(Long tagId) {
         this.tagId = tagId;
+    }
+
+    public Long getTemplateId() {
+        return templateId;
+    }
+
+    public void setTemplateId(Long templateId) {
+        this.templateId = templateId;
     }
 }

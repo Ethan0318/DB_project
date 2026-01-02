@@ -144,7 +144,7 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
         if (sessions == null) {
             return;
         }
-        List<Map<String, Object>> members = new ArrayList<>();
+        Map<Long, Map<String, Object>> membersByUser = new java.util.HashMap<>();
         for (WebSocketSession s : sessions) {
             Long userId = (Long) s.getAttributes().get("userId");
             if (userId == null) {
@@ -154,13 +154,13 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
             info.put("userId", userId);
             info.put("nickname", s.getAttributes().getOrDefault("nickname", "User" + userId));
             info.put("avatarUrl", s.getAttributes().get("avatarUrl"));
-            members.add(info);
+            membersByUser.put(userId, info);
         }
         WsMessage presence = new WsMessage();
         presence.setType("presence");
         presence.setDocId(docId);
         Map<String, Object> payload = new HashMap<>();
-        payload.put("members", members);
+        payload.put("members", new ArrayList<>(membersByUser.values()));
         presence.setPayload(payload);
         presence.setTimestamp(System.currentTimeMillis());
         broadcastToDoc(docId, presence, null);

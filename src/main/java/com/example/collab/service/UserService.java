@@ -6,8 +6,12 @@ import com.example.collab.common.ErrorCode;
 import com.example.collab.dto.UserProfileUpdateRequest;
 import com.example.collab.entity.User;
 import com.example.collab.entity.UserProfile;
+import com.example.collab.entity.Role;
+import com.example.collab.entity.UserRole;
+import com.example.collab.mapper.RoleMapper;
 import com.example.collab.mapper.UserMapper;
 import com.example.collab.mapper.UserProfileMapper;
+import com.example.collab.mapper.UserRoleMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,13 +29,17 @@ public class UserService {
 
     private final UserMapper userMapper;
     private final UserProfileMapper userProfileMapper;
+    private final UserRoleMapper userRoleMapper;
+    private final RoleMapper roleMapper;
 
     @Value("${app.upload-dir:uploads}")
     private String uploadDir;
 
-    public UserService(UserMapper userMapper, UserProfileMapper userProfileMapper) {
+    public UserService(UserMapper userMapper, UserProfileMapper userProfileMapper, UserRoleMapper userRoleMapper, RoleMapper roleMapper) {
         this.userMapper = userMapper;
         this.userProfileMapper = userProfileMapper;
+        this.userRoleMapper = userRoleMapper;
+        this.roleMapper = roleMapper;
     }
 
     public Map<String, Object> getProfile(Long userId) {
@@ -49,6 +57,7 @@ public class UserService {
             info.put("phone", profile.getPhone());
             info.put("bio", profile.getBio());
         }
+        info.put("roles", getRoles(user.getId()));
         return info;
     }
 
@@ -57,14 +66,16 @@ public class UserService {
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "User not found");
         }
-        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+        String email = request.getEmail() == null ? null : request.getEmail().trim();
+        String phone = request.getPhone() == null ? null : request.getPhone().trim();
+        if (email != null && !email.isBlank()) {
             long exists = userMapper.selectCount(new QueryWrapper<User>()
-                    .eq("email", request.getEmail())
+                    .eq("email", email)
                     .ne("id", userId));
             if (exists > 0) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, "Email already in use");
             }
-            user.setEmail(request.getEmail());
+            user.setEmail(email);
             user.setUpdatedAt(LocalDateTime.now());
             userMapper.updateById(user);
         }
@@ -77,8 +88,14 @@ public class UserService {
         if (request.getNickname() != null) {
             profile.setNickname(request.getNickname());
         }
-        if (request.getPhone() != null) {
-            profile.setPhone(request.getPhone());
+        if (phone != null && !phone.isBlank()) {
+            long exists = userProfileMapper.selectCount(new QueryWrapper<UserProfile>()
+                    .eq("phone", phone)
+                    .ne("user_id", userId));
+            if (exists > 0) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "Phone already in use");
+            }
+            profile.setPhone(phone);
         }
         if (request.getBio() != null) {
             profile.setBio(request.getBio());
@@ -125,5 +142,15 @@ public class UserService {
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.SERVER_ERROR, "Upload failed");
         }
+    }
+
+    private java.util.List<String> getRoles(Long userId) {
+        java.util.List<UserRole> userRoles = userRoleMapper.selectList(new QueryWrapper<UserRole>().eq("user_id", userId));
+        if (userRoles.isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.List<Long> roleIds = userRoles.stream().map(UserRole::getRoleId).toList();
+        java.util.List<Role> roles = roleMapper.selectBatchIds(roleIds);
+        return roles.stream().map(Role::getCode).toList();
     }
 }

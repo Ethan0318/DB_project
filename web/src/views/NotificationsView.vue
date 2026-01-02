@@ -8,6 +8,10 @@
           <el-option label="DOC_SHARE" value="DOC_SHARE" />
           <el-option label="MENTION" value="MENTION" />
           <el-option label="REPLY" value="REPLY" />
+          <el-option label="COMMENT" value="COMMENT" />
+          <el-option label="DOC_EDIT" value="DOC_EDIT" />
+          <el-option label="TASK_ASSIGN" value="TASK_ASSIGN" />
+          <el-option label="TASK_DONE" value="TASK_DONE" />
         </el-select>
         <el-select v-model="filterRead" placeholder="Read" clearable style="margin-top: 8px;">
           <el-option label="Unread" :value="0" />
@@ -15,6 +19,13 @@
         </el-select>
         <el-button style="margin-top: 8px;" @click="load">Apply</el-button>
         <el-button text @click="markAll">Mark all read</el-button>
+      </div>
+      <div style="margin-top: 16px;">
+        <div class="text-muted">Notification Settings</div>
+        <el-switch v-model="settings.editEnabled" active-text="Doc edit" @change="saveSettings" />
+        <el-switch v-model="settings.commentEnabled" active-text="Comments" @change="saveSettings" />
+        <el-switch v-model="settings.taskEnabled" active-text="Tasks" @change="saveSettings" />
+        <el-switch v-model="settings.shareEnabled" active-text="Doc share" @change="saveSettings" />
       </div>
     </aside>
     <main class="content">
@@ -52,6 +63,7 @@ const notificationStore = useNotificationStore()
 const notifications = ref<any[]>([])
 const filterType = ref<string | null>(null)
 const filterRead = ref<number | null>(null)
+const settings = ref<any>({ editEnabled: true, commentEnabled: true, taskEnabled: true, shareEnabled: true })
 
 const load = async () => {
   const { data } = await http.get('/api/notifications', {
@@ -61,6 +73,15 @@ const load = async () => {
     }
   })
   notifications.value = data.data || []
+}
+
+const loadSettings = async () => {
+  const { data } = await http.get('/api/notifications/settings')
+  settings.value = data.data || settings.value
+}
+
+const saveSettings = async () => {
+  await http.put('/api/notifications/settings', settings.value)
 }
 
 const markRead = async (id: number) => {
@@ -77,7 +98,10 @@ const goBack = () => router.push('/docs')
 
 const formatTime = (raw: string) => (raw ? new Date(raw).toLocaleString() : '')
 
-onMounted(load)
+onMounted(async () => {
+  await loadSettings()
+  await load()
+})
 </script>
 
 <style scoped>

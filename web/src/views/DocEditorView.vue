@@ -9,9 +9,10 @@
         <div class="text-muted">Online</div>
         <PresenceList :members="presenceMembers" />
       </div>
-      <div style="margin-top: 16px;">
+      <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;">
         <el-button class="gradient-button" type="primary" @click="commentDrawer = true">Comments</el-button>
         <el-button @click="chatDrawer = true">Chat</el-button>
+        <el-button @click="openTasks">Tasks</el-button>
         <el-button @click="openShare">Share</el-button>
         <el-button @click="openHistory">History</el-button>
       </div>
@@ -23,7 +24,13 @@
     <main class="content">
       <div class="editor-shell">
         <input v-model="title" class="editor-title" @change="saveTitle" />
-        <div style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 16px;">
+        <div class="presence-bar">
+          <div v-for="m in presenceChips" :key="m.userId" class="presence-pill">
+            <el-avatar :size="26" :src="m.avatarUrl">{{ m.nickname?.slice(0, 1) || 'U' }}</el-avatar>
+            <span>{{ m.nickname || `User${m.userId}` }}</span>
+          </div>
+        </div>
+        <div class="toolbar-row">
           <div class="toolbar">
             <el-button size="small" @click="cmd('toggleBold')">Bold</el-button>
             <el-button size="small" @click="cmd('toggleItalic')">Italic</el-button>
@@ -33,30 +40,120 @@
             <el-button size="small" @click="cmd('toggleBlockquote')">Quote</el-button>
             <el-button size="small" @click="cmd('toggleCodeBlock')">Code</el-button>
             <el-button size="small" @click="setLink">Link</el-button>
+            <el-popover v-model:visible="tablePopover" placement="bottom-start" width="220" trigger="click">
+              <div class="table-grid">
+                <div
+                  v-for="r in 6"
+                  :key="'r'+r"
+                  class="table-row"
+                >
+                  <div
+                    v-for="c in 6"
+                    :key="'c'+c"
+                    class="table-cell"
+                    :class="{ active: r <= hoverRows && c <= hoverCols }"
+                    @mouseenter="() => { hoverRows = r; hoverCols = c }"
+                    @click="insertTable(r, c)"
+                  ></div>
+                </div>
+                <div class="text-muted" style="margin-top: 6px;">{{ hoverRows }} x {{ hoverCols }} table</div>
+              </div>
+              <template #reference>
+                <el-button size="small">Insert Table</el-button>
+              </template>
+            </el-popover>
             <el-button size="small" @click="createAnchor">Comment</el-button>
           </div>
-          <div class="save-state">{{ saveStatus }}</div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-button size="small" @click="exportDoc('html')">Export HTML</el-button>
+            <el-button size="small" @click="exportDoc('markdown')">Export MD</el-button>
+            <div class="save-state">{{ saveStatus }}</div>
+          </div>
         </div>
-        <EditorContent v-if="editor" :editor="editor" />
+        <EditorContent v-if="editor" :editor="editor" class="prose-editor" />
       </div>
     </main>
   </div>
 
   <el-drawer v-model="commentDrawer" title="Comments" size="30%">
-    <CommentPanel
-      :comments="comments"
-      :anchor-preview="anchorPreview"
-      @submit="submitComment"
-    />
+    <CommentPanel :comments="comments" :anchor-preview="anchorPreview" @submit="submitComment" />
   </el-drawer>
 
   <ChatDrawer v-model="chatDrawer" :messages="chatMessages" @send="sendChat" />
+
+  <el-drawer v-model="taskDrawer" title="Tasks" size="32%">
+    <el-form label-position="top">
+      <el-form-item label="Title">
+        <el-input v-model="taskForm.title" placeholder="Task title" />
+      </el-form-item>
+      <el-form-item label="Description">
+        <el-input v-model="taskForm.description" type="textarea" rows="2" />
+      </el-form-item>
+      <el-form-item label="Assignee">
+        <el-select
+          v-model="taskForm.assigneeId"
+          filterable
+          remote
+          placeholder="Search user"
+          :remote-method="searchUser"
+        >
+          <el-option v-for="user in userOptions" :key="user.id" :label="user.label" :value="user.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="Due date">
+        <el-date-picker v-model="taskForm.dueDate" type="date" placeholder="Select" style="width: 100%" />
+      </el-form-item>
+      <el-form-item>
+        <el-button class="gradient-button" type="primary" @click="createTask">Create Task</el-button>
+      </el-form-item>
+    </el-form>
+    <el-divider />
+    <div v-for="task in tasks" :key="task.id" class="task-card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div><strong>{{ task.title }}</strong></div>
+          <div class="text-muted">{{ task.description || 'No description' }}</div>
+          <div class="text-muted">
+            Assignee: {{ userLabel(task.assigneeId) || 'Unassigned' }} · Due: {{ formatDate(task.dueDate) || '-' }}
+          </div>
+        </div>
+        <el-tag :type="task.status === 'DONE' ? 'success' : 'info'">{{ task.status }}</el-tag>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 8px; align-items: center;">
+        <el-select
+          v-model="task.assigneeId"
+          placeholder="Assignee"
+          filterable
+          remote
+          :remote-method="searchUser"
+          @change="(val) => updateTask(task.id, task.status, val, task.dueDate)"
+        >
+          <el-option v-for="user in userOptions" :key="user.id" :label="user.label" :value="user.id" />
+        </el-select>
+        <el-select
+          v-model="task.status"
+          placeholder="Status"
+          style="width: 120px"
+          @change="(val) => updateTask(task.id, val, task.assigneeId, task.dueDate)"
+        >
+          <el-option label="TODO" value="TODO" />
+          <el-option label="DONE" value="DONE" />
+        </el-select>
+        <el-date-picker
+          :model-value="task.dueDate ? new Date(task.dueDate) : null"
+          type="date"
+          placeholder="Due date"
+          @change="(val) => updateTask(task.id, task.status, task.assigneeId, val)"
+        />
+      </div>
+    </div>
+  </el-drawer>
 
   <el-dialog v-model="shareDialog" title="Share Document" width="420px">
     <el-form label-position="top">
       <el-form-item label="User">
         <el-select v-model="shareUserId" filterable remote placeholder="Search user" :remote-method="searchUser">
-          <el-option v-for="user in shareOptions" :key="user.id" :label="user.label" :value="user.id" />
+          <el-option v-for="user in userOptions" :key="user.id" :label="user.label" :value="user.id" />
         </el-select>
       </el-form-item>
       <el-form-item label="Permission">
@@ -103,6 +200,10 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import Table from '@tiptap/extension-table'
+import TableRow from '@tiptap/extension-table-row'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
 import http from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useCollabSocket } from '@/ws/collab'
@@ -122,16 +223,35 @@ const comments = ref<any[]>([])
 const chatMessages = ref<any[]>([])
 const snapshots = ref<any[]>([])
 const presenceMembers = ref<any[]>([])
+const tasks = ref<any[]>([])
+const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+const presenceChips = computed(() =>
+  presenceMembers.value.map((m: any) => {
+    const avatar = m.avatarUrl && m.avatarUrl.startsWith('/uploads') ? `${apiBase}${m.avatarUrl}` : m.avatarUrl
+    return { ...m, avatarUrl: avatar, color: pickColor(m.userId || 0) }
+  })
+)
 
 const commentDrawer = ref(false)
 const chatDrawer = ref(false)
+const taskDrawer = ref(false)
 const shareDialog = ref(false)
 const historyDialog = ref(false)
 const draftDialog = ref(false)
 
 const shareUserId = ref<number | null>(null)
 const sharePerm = ref('VIEW')
-const shareOptions = ref<any[]>([])
+const userOptions = ref<any[]>([])
+
+const taskForm = ref<{ title: string; description: string; assigneeId?: number; dueDate?: Date | null }>({
+  title: '',
+  description: '',
+  assigneeId: undefined,
+  dueDate: null
+})
+const tablePopover = ref(false)
+const hoverRows = ref(3)
+const hoverCols = ref(3)
 
 const anchorPreview = ref('')
 let anchorPayload: string | null = null
@@ -155,6 +275,10 @@ const editor = useEditor({
     Underline,
     Link.configure({ openOnClick: false }),
     Placeholder.configure({ placeholder: 'Start typing...' }),
+    Table.configure({ resizable: false, HTMLAttributes: { class: 'doc-table' } }),
+    TableRow,
+    TableHeader,
+    TableCell,
     RemoteCursorExtension
   ],
   onUpdate: ({ editor }) => {
@@ -200,6 +324,11 @@ const loadChat = async () => {
   chatMessages.value = data.data || []
 }
 
+const loadTasks = async () => {
+  const { data } = await http.get(`/api/docs/${docId}/tasks`)
+  tasks.value = data.data || []
+}
+
 const connectSocket = () => {
   connect(docId, (msg) => {
     if (msg.type === 'presence') {
@@ -221,6 +350,9 @@ const connectSocket = () => {
       lastRemoteUpdate = updatedAt
       isApplyingRemote = true
       editor.value?.commands.setContent(msg.payload?.content || '')
+      if (editor.value) {
+        updateRemoteCursors(editor.value, Array.from(remoteCursorMap.values()))
+      }
       isApplyingRemote = false
     }
     if (msg.type === 'cursor_update') {
@@ -248,6 +380,12 @@ const connectSocket = () => {
       })
     }
   })
+  setTimeout(() => {
+    if (editor.value) {
+      const { from, to } = editor.value.state.selection
+      sendCursor(from, to)
+    }
+  }, 400)
 }
 
 const scheduleSave = (html: string) => {
@@ -275,19 +413,23 @@ const scheduleBroadcast = (html: string) => {
 const scheduleCursor = (from: number, to: number) => {
   clearTimeout(cursorTimer)
   cursorTimer = setTimeout(() => {
-    send({
-      type: 'cursor_update',
-      docId,
-      senderId: auth.user?.id,
-      senderName: auth.user?.nickname,
-      payload: {
-        from,
-        to,
-        name: auth.user?.nickname || auth.user?.email,
-        color: myColor.value
-      }
-    })
+    sendCursor(from, to)
   }, 200)
+}
+
+const sendCursor = (from: number, to: number) => {
+  send({
+    type: 'cursor_update',
+    docId,
+    senderId: auth.user?.id,
+    senderName: auth.user?.nickname,
+    payload: {
+      from,
+      to,
+      name: auth.user?.nickname || auth.user?.email,
+      color: myColor.value
+    }
+  })
 }
 
 const cmd = (command: string, attrs?: any) => {
@@ -299,6 +441,11 @@ const setLink = () => {
   const url = window.prompt('Enter URL')
   if (!url || !editor.value) return
   editor.value.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+}
+
+const insertTable = (rows: number, cols: number) => {
+  tablePopover.value = false
+  editor.value?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()
 }
 
 const createAnchor = () => {
@@ -344,7 +491,7 @@ const openShare = async () => {
 
 const searchUser = async (keyword: string) => {
   const { data } = await http.get('/api/users/search', { params: { keyword } })
-  shareOptions.value = (data.data || []).map((user: any) => ({
+  userOptions.value = (data.data || []).map((user: any) => ({
     id: user.id,
     label: user.nickname ? `${user.nickname} (${user.email})` : user.email
   }))
@@ -366,6 +513,33 @@ const restoreSnapshot = async (snapshotId: number) => {
   await http.post(`/api/docs/${docId}/snapshots/${snapshotId}/restore`)
   historyDialog.value = false
   await loadDoc()
+}
+
+const openTasks = async () => {
+  taskDrawer.value = true
+  await searchUser('')
+  await loadTasks()
+}
+
+const createTask = async () => {
+  if (!taskForm.value.title.trim()) return
+  await http.post(`/api/docs/${docId}/tasks`, {
+    title: taskForm.value.title,
+    description: taskForm.value.description,
+    assigneeId: taskForm.value.assigneeId,
+    dueDate: taskForm.value.dueDate ? taskForm.value.dueDate.toISOString() : undefined
+  })
+  taskForm.value = { title: '', description: '', assigneeId: undefined, dueDate: null }
+  await loadTasks()
+}
+
+const updateTask = async (taskId: number, status: string, assigneeId?: number, dueDate?: string | Date | null) => {
+  await http.put(`/api/docs/${docId}/tasks/${taskId}`, {
+    status,
+    assigneeId,
+    dueDate: dueDate instanceof Date ? dueDate.toISOString() : dueDate || undefined
+  })
+  await loadTasks()
 }
 
 const restoreDraft = () => {
@@ -394,7 +568,27 @@ const logout = () => {
   router.push('/login')
 }
 
+const exportDoc = async (format: 'html' | 'markdown') => {
+  const { data } = await http.get(`/api/docs/${docId}/export`, {
+    params: { format },
+    responseType: 'blob'
+  })
+  downloadBlob(data, `doc_${docId}.${format === 'markdown' ? 'md' : 'html'}`)
+}
+
+const downloadBlob = (blobData: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blobData)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  window.URL.revokeObjectURL(url)
+}
+
 const formatTime = (raw: string) => (raw ? new Date(raw).toLocaleString() : '')
+const formatDate = (raw?: string) => (raw ? new Date(raw).toLocaleDateString() : '')
+const userLabel = (userId?: number) =>
+  userOptions.value.find((u) => u.id === userId)?.label || (userId ? `User ${userId}` : '')
 
 function pickColor(seed: number) {
   const palette = ['#2a7cf7', '#ff6b6b', '#6bcf63', '#f7b32b', '#8b5cf6']
@@ -402,10 +596,13 @@ function pickColor(seed: number) {
 }
 
 onMounted(async () => {
-  await auth.fetchMe()
+  if (auth.token) {
+    await auth.fetchMe()
+  }
   await loadDoc()
   await loadComments()
   await loadChat()
+  await loadTasks()
   connectSocket()
 })
 
@@ -425,5 +622,87 @@ onBeforeUnmount(() => {
 .text-muted {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.task-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.toolbar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 8px 0 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.presence-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.presence-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+}
+
+.table-grid {
+  display: inline-block;
+  padding: 6px;
+}
+
+.table-row {
+  display: flex;
+}
+
+.table-cell {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #e5e7eb;
+  margin: 2px;
+  border-radius: 4px;
+}
+
+.table-cell.active {
+  background: #cce5ff;
+  border-color: #2a7cf7;
+}
+
+.editor-shell {
+  position: relative;
+}
+
+:deep(.ProseMirror table),
+:deep(.ProseMirror table.doc-table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 8px;
+}
+
+:deep(.ProseMirror th),
+:deep(.ProseMirror td) {
+  border: 1px solid #d9d9d9;
+  padding: 6px;
+  vertical-align: top;
+}
+
+:deep(.ProseMirror th p),
+:deep(.ProseMirror td p) {
+  margin: 0;
+}
+
+:deep(.ProseMirror th) {
+  background: #f7f8fa;
+  font-weight: 600;
 }
 </style>

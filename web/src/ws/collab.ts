@@ -9,13 +9,16 @@ export interface WsMessage {
   timestamp?: number
 }
 
+const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+const wsBase = (import.meta.env.VITE_WS_BASE || apiBase).replace(/^http/, 'ws')
+
 export const useCollabSocket = () => {
   const auth = useAuthStore()
   let socket: WebSocket | null = null
 
   const connect = (docId: number, onMessage: (msg: WsMessage) => void) => {
     if (!auth.token) return
-    const wsUrl = (import.meta.env.VITE_WS_BASE || 'ws://localhost:8080') + `/ws?token=${auth.token}`
+    const wsUrl = `${wsBase}/ws?token=${auth.token}`
     socket = new WebSocket(wsUrl)
     socket.onopen = () => {
       send({ type: 'join', docId })

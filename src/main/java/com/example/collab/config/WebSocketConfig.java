@@ -28,6 +28,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(collabWebSocketHandler, "/ws")
                 .addInterceptors(authHandshakeInterceptor)
-                .setAllowedOrigins(allowedOrigins.split(","));
+                .setAllowedOriginPatterns("*");
     }
 }

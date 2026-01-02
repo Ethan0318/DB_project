@@ -7,7 +7,9 @@ import com.example.collab.websocket.CollabWebSocketHandler;
 import com.example.collab.websocket.WsMessage;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,19 +19,34 @@ public class NotificationService {
 
     private final NotificationMapper notificationMapper;
     private final CollabWebSocketHandler webSocketHandler;
+    private final NotificationSettingsService notificationSettingsService;
 
-    public NotificationService(NotificationMapper notificationMapper, CollabWebSocketHandler webSocketHandler) {
+    public NotificationService(NotificationMapper notificationMapper,
+                               CollabWebSocketHandler webSocketHandler,
+                               NotificationSettingsService notificationSettingsService) {
         this.notificationMapper = notificationMapper;
         this.webSocketHandler = webSocketHandler;
+        this.notificationSettingsService = notificationSettingsService;
     }
 
     public Notification notifyUser(Long userId, String type, String payload) {
+        return notifyUser(userId, type, payload, null);
+    }
+
+    public Notification notifyUser(Long userId, String type, String payload, Long clientTimestamp) {
+        if (!notificationSettingsService.enabled(userId, type)) {
+            return null;
+        }
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setType(type);
         notification.setPayload(payload);
         notification.setReadFlag(0);
-        notification.setCreatedAt(LocalDateTime.now());
+        if (clientTimestamp != null) {
+            notification.setCreatedAt(LocalDateTime.ofInstant(Instant.ofEpochMilli(clientTimestamp), ZoneOffset.UTC));
+        } else {
+            notification.setCreatedAt(LocalDateTime.now());
+        }
         notificationMapper.insert(notification);
         WsMessage ws = new WsMessage();
         ws.setType("notification");

@@ -20,8 +20,10 @@ import com.example.collab.mapper.UserProfileMapper;
 import com.example.collab.mapper.UserRoleMapper;
 import com.example.collab.util.JwtUtil;
 import com.example.collab.util.RandomCodeUtil;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -60,7 +62,7 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request, String ip) {
-        User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", request.getEmail()));
+        User user = findUserByAccount(request.getAccount());
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid credentials");
         }
@@ -73,24 +75,50 @@ public class AuthService {
         return new AuthResponse(token, userInfo);
     }
 
+    @Transactional
     public AuthResponse register(RegisterRequest request) {
-        if (userMapper.selectCount(new QueryWrapper<User>().eq("email", request.getEmail())) > 0) {
+        if ((request.getEmail() == null || request.getEmail().isBlank())
+                && (request.getPhone() == null || request.getPhone().isBlank())) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Email or phone required");
+        }
+        String normalizedEmail = request.getEmail();
+        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+            if (request.getPhone() != null && !request.getPhone().isBlank()) {
+                normalizedEmail = request.getPhone() + "@placeholder.local";
+            } else {
+                normalizedEmail = "user" + System.currentTimeMillis() + "@placeholder.local";
+            }
+        }
+        if (normalizedEmail != null && userMapper.selectCount(new QueryWrapper<User>().eq("email", normalizedEmail)) > 0) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, "Email already registered");
         }
+        if (request.getPhone() != null && userProfileMapper.selectCount(new QueryWrapper<UserProfile>().eq("phone", request.getPhone())) > 0) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "Phone already registered");
+        }
+
         User user = new User();
-        user.setEmail(request.getEmail());
+        user.setEmail(normalizedEmail);
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setStatus(1);
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
-        userMapper.insert(user);
+        try {
+            userMapper.insert(user);
+        } catch (DataAccessException ex) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "Register failed: " + ex.getMostSpecificCause().getMessage());
+        }
 
         UserProfile profile = new UserProfile();
         profile.setUserId(user.getId());
         profile.setNickname(request.getNickname());
+        profile.setPhone(request.getPhone());
         profile.setCreatedAt(LocalDateTime.now());
         profile.setUpdatedAt(LocalDateTime.now());
-        userProfileMapper.insert(profile);
+        try {
+            userProfileMapper.insert(profile);
+        } catch (DataAccessException ex) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "Register failed: " + ex.getMostSpecificCause().getMessage());
+        }
 
         Role editorRole = roleMapper.selectOne(new QueryWrapper<Role>().eq("code", "EDITOR"));
         if (editorRole != null) {
@@ -106,7 +134,7 @@ public class AuthService {
     }
 
     public Map<String, Object> requestReset(ResetRequest request) {
-        User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", request.getEmail()));
+        User user = findUserByAccount(request.getAccount());
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "User not found");
         }
@@ -126,7 +154,7 @@ public class AuthService {
     }
 
     public void confirmReset(ResetConfirmRequest request) {
-        User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", request.getEmail()));
+        User user = findUserByAccount(request.getAccount());
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "User not found");
         }
@@ -167,6 +195,21 @@ public class AuthService {
             info.put("phone", profile.getPhone());
             info.put("bio", profile.getBio());
         }
+        info.put("roles", getRoles(user.getId()));
         return info;
+    }
+
+    private User findUserByAccount(String account) {
+        if (account == null || account.isBlank()) {
+            return null;
+        }
+        if (account.contains("@")) {
+            return userMapper.selectOne(new QueryWrapper<User>().eq("email", account));
+        }
+        UserProfile profile = userProfileMapper.selectOne(new QueryWrapper<UserProfile>().eq("phone", account));
+        if (profile == null) {
+            return null;
+        }
+        return userMapper.selectById(profile.getUserId());
     }
 }

@@ -1,13 +1,13 @@
 package com.example.collab.dto;
 
-import jakarta.validation.constraints.Email;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public class ResetConfirmRequest {
-    @Email
     @NotBlank
-    private String email;
+    @JsonAlias("email")
+    private String account;
 
     @NotBlank
     private String code;
@@ -16,12 +16,12 @@ public class ResetConfirmRequest {
     @Size(min = 6, max = 32)
     private String newPassword;
 
-    public String getEmail() {
-        return email;
+    public String getAccount() {
+        return account;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setAccount(String account) {
+        this.account = account;
     }
 
     public String getCode() {
