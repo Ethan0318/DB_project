@@ -112,4 +112,10 @@ public class AdminService {
         result.put("activeUsers", opLogMapper.selectCount(new QueryWrapper<OpLog>().isNotNull("user_id")));
         return result;
     }
+
+    public List<OpLog> recentLogs(int limit) {
+        return opLogMapper.selectList(new QueryWrapper<OpLog>()
+                .orderByDesc("created_at")
+                .last("limit " + limit));
+    }
 }

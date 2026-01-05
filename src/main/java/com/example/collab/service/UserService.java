@@ -120,11 +120,7 @@ public class UserService {
         }
         String storedName = "avatar_" + userId + "_" + System.currentTimeMillis() + suffix;
         try {
-            Path dir = Paths.get(uploadDir);
-            Files.createDirectories(dir);
-            Path target = dir.resolve(storedName);
-            file.transferTo(target);
-            String url = "/uploads/" + storedName;
+            String url = saveFile(file, storedName);
             UserProfile profile = userProfileMapper.selectOne(new QueryWrapper<UserProfile>().eq("user_id", userId));
             if (profile == null) {
                 profile = new UserProfile();
@@ -142,6 +138,31 @@ public class UserService {
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.SERVER_ERROR, "Upload failed");
         }
+    }
+
+    public String uploadFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "File is empty");
+        }
+        String filename = file.getOriginalFilename();
+        String suffix = "";
+        if (filename != null && filename.contains(".")) {
+            suffix = filename.substring(filename.lastIndexOf("."));
+        }
+        String storedName = "file_" + System.currentTimeMillis() + suffix;
+        try {
+            return saveFile(file, storedName);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "Upload failed");
+        }
+    }
+
+    private String saveFile(MultipartFile file, String storedName) throws IOException {
+        Path dir = Paths.get(uploadDir);
+        Files.createDirectories(dir);
+        Path target = dir.resolve(storedName);
+        file.transferTo(target);
+        return "/uploads/" + storedName;
     }
 
     private java.util.List<String> getRoles(Long userId) {

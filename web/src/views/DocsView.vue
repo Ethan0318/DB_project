@@ -78,32 +78,65 @@
           />
           <el-button @click="openImport">Import Markdown</el-button>
           <el-button :disabled="selectedDocIds.length === 0" @click="batchDialog = true">Batch Export</el-button>
+          <el-switch v-model="groupView" active-text="Group by tag" />
         </div>
 
-        <el-table
-          :data="docs"
-          style="width: 100%; margin-top: 8px"
-          @selection-change="onSelectionChange"
-        >
-          <el-table-column type="selection" width="45" />
-          <el-table-column prop="title" label="Title" />
-          <el-table-column prop="updatedAt" label="Updated" width="180">
-            <template #default="scope">
-              {{ formatTime(scope.row.updatedAt) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="tagId" label="Tag" width="140">
-            <template #default="scope">
-              {{ tagName(scope.row.tagId) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="Actions" width="200">
-            <template #default="scope">
-              <el-button size="small" @click="openDoc(scope.row.id)">Open</el-button>
-              <el-button size="small" text @click="exportSingle(scope.row.id, 'html')">Export</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <template v-if="!groupView">
+          <el-table
+            :data="docs"
+            style="width: 100%; margin-top: 8px"
+            @selection-change="onSelectionChange"
+          >
+            <el-table-column type="selection" width="45" />
+            <el-table-column prop="title" label="Title" />
+            <el-table-column prop="updatedAt" label="Updated" width="180">
+              <template #default="scope">
+                {{ formatTime(scope.row.updatedAt) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="tagId" label="Tag" width="140">
+              <template #default="scope">
+                {{ tagName(scope.row.tagId) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="openDoc(scope.row.id)">Open</el-button>
+                <el-button size="small" text @click="exportSingle(scope.row.id, 'html')">Export</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+
+        <template v-else>
+          <div class="grouped">
+            <div v-for="group in groupedDocs" :key="group.id" class="group-card">
+              <div class="group-header">
+                <span>{{ group.name }}</span>
+                <span class="text-muted">{{ group.items.length }} docs</span>
+              </div>
+              <el-table
+                :data="group.items"
+                size="small"
+                @selection-change="(rows) => onGroupSelectionChange(rows, group.id)"
+              >
+                <el-table-column type="selection" width="45" />
+                <el-table-column prop="title" label="Title" />
+                <el-table-column prop="updatedAt" label="Updated" width="170">
+                  <template #default="scope">
+                    {{ formatTime(scope.row.updatedAt) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="Actions" width="160">
+                  <template #default="scope">
+                    <el-button size="small" @click="openDoc(scope.row.id)">Open</el-button>
+                    <el-button size="small" text @click="exportSingle(scope.row.id, 'html')">Export</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </div>
+        </template>
       </div>
     </main>
   </div>
@@ -193,6 +226,7 @@ const selectedAuthorId = ref<number | null>(null)
 const dateRange = ref<[Date, Date] | null>(null)
 const authorOptions = ref<{ value: number; label: string }[]>([])
 const authorLoading = ref(false)
+const groupView = ref(false)
 
 const createDialog = ref(false)
 const newTitle = ref('')
@@ -211,6 +245,31 @@ const surveyRating = ref(5)
 const surveyFeedback = ref('')
 
 const importInput = ref<HTMLInputElement | null>(null)
+
+const groupedDocs = computed(() => {
+  const tagMap = new Map<number, string>()
+  tags.value.forEach((t: any) => tagMap.set(t.id, t.name))
+  const bucket = new Map<string, { id: string; name: string; items: any[] }>()
+  docs.value.forEach((d: any) => {
+    const id = d.tagId ? String(d.tagId) : 'untagged'
+    if (!bucket.has(id)) {
+      bucket.set(id, {
+        id,
+        name: d.tagId ? tagMap.get(d.tagId) || 'Unknown' : 'Uncategorized',
+        items: []
+      })
+    }
+    bucket.get(id)!.items.push(d)
+  })
+  // keep tag order then untagged at end
+  const ordered: { id: string; name: string; items: any[] }[] = []
+  tags.value.forEach((t: any) => {
+    const g = bucket.get(String(t.id))
+    if (g) ordered.push(g)
+  })
+  if (bucket.has('untagged')) ordered.push(bucket.get('untagged')!)
+  return ordered
+})
 
 const loadDocs = async () => {
   const params: any = {
@@ -305,6 +364,14 @@ const onSelectionChange = (rows: any[]) => {
   selectedDocIds.value = rows.map((r) => r.id)
 }
 
+const onGroupSelectionChange = (rows: any[], groupId: string) => {
+  const keep = new Set(selectedDocIds.value)
+  const affected = docs.value.filter((d: any) => (d.tagId ? String(d.tagId) : 'untagged') === groupId)
+  affected.forEach((d: any) => keep.delete(d.id))
+  rows.forEach((r: any) => keep.add(r.id))
+  selectedDocIds.value = Array.from(keep)
+}
+
 const openImport = () => {
   importInput.value?.click()
 }
@@ -392,5 +459,26 @@ onUnmounted(() => {
   gap: 12px;
   margin: 12px 0;
   flex-wrap: wrap;
+}
+
+.grouped {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 12px;
+}
+
+.group-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0 8px;
 }
 </style>

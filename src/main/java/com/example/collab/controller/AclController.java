@@ -54,6 +54,7 @@ public class AclController {
         Long operator = SecurityUtil.getCurrentUserId();
         aclService.assertPermission(docId, operator, DocPermission.ADMIN, SecurityUtil.isAdmin());
         aclService.revoke(docId, userId);
+        opLogService.log(operator, "ACL_REVOKE", "Revoke doc " + docId + " from user " + userId, null);
         return ApiResponse.ok(null);
     }
 

@@ -62,6 +62,10 @@
                 <el-button size="small">Insert Table</el-button>
               </template>
             </el-popover>
+            <el-button size="small" @click="addRow">Row +</el-button>
+            <el-button size="small" @click="addColumn">Col +</el-button>
+            <el-button size="small" type="danger" @click="deleteTable">Del Table</el-button>
+            <el-button size="small" type="primary" @click="startMeeting">Start Meeting</el-button>
             <el-button size="small" @click="createAnchor">Comment</el-button>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -211,6 +215,7 @@ import { RemoteCursorExtension, updateRemoteCursors, RemoteCursor } from '@/edit
 import PresenceList from '@/components/PresenceList.vue'
 import CommentPanel from '@/components/CommentPanel.vue'
 import ChatDrawer from '@/components/ChatDrawer.vue'
+import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -321,7 +326,12 @@ const loadComments = async () => {
 
 const loadChat = async () => {
   const { data } = await http.get(`/api/docs/${docId}/chat`)
-  chatMessages.value = data.data || []
+  chatMessages.value = (data.data || []).map((m: any) => ({
+    ...m,
+    fileUrl: m.content?.startsWith('[file]') ? m.content.split('|')[1] : undefined,
+    fileName: m.content?.startsWith('[file]') ? m.content.substring(6, m.content.indexOf('|')) : undefined,
+    content: m.content?.startsWith('[file]') ? '' : m.content
+  }))
 }
 
 const loadTasks = async () => {
@@ -375,7 +385,9 @@ const connectSocket = () => {
         id: msg.payload?.id,
         senderId: msg.senderId,
         senderName: msg.senderName,
-        content: msg.payload?.content,
+        content: msg.payload?.fileUrl ? '' : msg.payload?.content,
+        fileUrl: msg.payload?.fileUrl,
+        fileName: msg.payload?.fileName,
         createdAt: msg.payload?.createdAt
       })
     }
@@ -448,6 +460,17 @@ const insertTable = (rows: number, cols: number) => {
   editor.value?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()
 }
 
+const ensureTableAction = (run: () => boolean) => {
+  const ok = run()
+  if (!ok) {
+    ElMessage.warning('请先选中表格')
+  }
+}
+
+const addRow = () => editor.value && ensureTableAction(() => editor.value!.chain().focus().addRowAfter().run())
+const addColumn = () => editor.value && ensureTableAction(() => editor.value!.chain().focus().addColumnAfter().run())
+const deleteTable = () => editor.value && ensureTableAction(() => editor.value!.chain().focus().deleteTable().run())
+
 const createAnchor = () => {
   if (!editor.value) return
   const { from, to } = editor.value.state.selection
@@ -470,7 +493,25 @@ const submitComment = async (payload: { content: string; parentId?: number; atUs
   await loadComments()
 }
 
-const sendChat = (content: string) => {
+const sendChat = (content: string, file?: File) => {
+  if (file) {
+    const form = new FormData()
+    form.append('file', file)
+    http
+      .post(`/api/docs/${docId}/chat/upload`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      .then(({ data }) => {
+        send({
+          type: 'chat_message',
+          docId,
+          senderId: auth.user?.id,
+          senderName: auth.user?.nickname,
+          payload: { fileUrl: data.data.url, fileName: data.data.name, content }
+        })
+      })
+    return
+  }
   send({
     type: 'chat_message',
     docId,
@@ -593,6 +634,13 @@ const userLabel = (userId?: number) =>
 function pickColor(seed: number) {
   const palette = ['#2a7cf7', '#ff6b6b', '#6bcf63', '#f7b32b', '#8b5cf6']
   return palette[Math.abs(seed) % palette.length]
+}
+
+// 一键发起会议（使用浏览器 WebRTC 会议室 meet.jit.si）
+const startMeeting = () => {
+  const link = `https://meet.jit.si/collab-doc-${docId}`
+  window.open(link, '_blank', 'noopener')
+  sendChat(`Join meeting: ${link}`)
 }
 
 onMounted(async () => {

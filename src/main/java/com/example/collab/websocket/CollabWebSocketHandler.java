@@ -53,6 +53,8 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
             case "join" -> handleJoin(session, wsMessage);
             case "content_update", "cursor_update" -> broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
             case "chat_message" -> handleChatMessage(session, wsMessage);
+            case "meeting_offer", "meeting_answer", "meeting_ice", "meeting_end", "meeting_start" ->
+                    broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
             default -> {
             }
         }
@@ -100,14 +102,21 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
         if (docId == null || userId == null) {
             return;
         }
-        String content = message.getPayload() == null ? null : (String) message.getPayload().get("content");
-        if (content == null || content.isBlank()) {
+        Map<String, Object> payload = message.getPayload();
+        String content = payload == null ? null : (String) payload.get("content");
+        String fileUrl = payload == null ? null : (String) payload.get("fileUrl");
+        String fileName = payload == null ? null : (String) payload.get("fileName");
+        if ((content == null || content.isBlank()) && (fileUrl == null || fileUrl.isBlank())) {
             return;
+        }
+        String storedContent = content;
+        if (fileUrl != null) {
+            storedContent = "[file]" + (fileName == null ? "" : fileName) + "|" + fileUrl;
         }
         ChatMessage chat = new ChatMessage();
         chat.setDocId(docId);
         chat.setSenderId(userId);
-        chat.setContent(content);
+        chat.setContent(storedContent);
         chat.setCreatedAt(LocalDateTime.now());
         chatService.save(chat);
 
@@ -116,11 +125,13 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
         broadcast.setDocId(docId);
         broadcast.setSenderId(userId);
         broadcast.setSenderName((String) session.getAttributes().get("nickname"));
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("id", chat.getId());
-        payload.put("content", content);
-        payload.put("createdAt", chat.getCreatedAt().toString());
-        broadcast.setPayload(payload);
+        Map<String, Object> outPayload = new HashMap<>();
+        outPayload.put("id", chat.getId());
+        outPayload.put("content", content);
+        outPayload.put("fileUrl", fileUrl);
+        outPayload.put("fileName", fileName);
+        outPayload.put("createdAt", chat.getCreatedAt().toString());
+        broadcast.setPayload(outPayload);
         broadcast.setTimestamp(System.currentTimeMillis());
         broadcastToDoc(docId, broadcast, null);
     }
