@@ -51,7 +51,9 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
         }
         switch (wsMessage.getType()) {
             case "join" -> handleJoin(session, wsMessage);
-            case "content_update", "cursor_update" -> broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
+            case "content_update" -> handleContentUpdate(session, wsMessage);
+            case "cursor_update" -> broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
+            case "cursor_request" -> broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
             case "chat_message" -> handleChatMessage(session, wsMessage);
             case "meeting_offer", "meeting_answer", "meeting_ice", "meeting_end", "meeting_start" ->
                     broadcastToDoc(wsMessage.getDocId(), wsMessage, session);
@@ -94,6 +96,58 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
         docRooms.computeIfAbsent(docId, key -> ConcurrentHashMap.newKeySet()).add(session);
         attachProfile(session);
         broadcastPresence(docId);
+        requestSyncFromPeer(docId, session);
+    }
+
+    private void handleContentUpdate(WebSocketSession session, WsMessage message) {
+        Long targetUserId = extractTargetUserId(message.getPayload());
+        if (targetUserId != null) {
+            message.setTimestamp(System.currentTimeMillis());
+            sendToUser(targetUserId, message);
+            return;
+        }
+        broadcastToDoc(message.getDocId(), message, session);
+    }
+
+    private Long extractTargetUserId(Map<String, Object> payload) {
+        if (payload == null) {
+            return null;
+        }
+        Object raw = payload.get("targetUserId");
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Long.valueOf(String.valueOf(raw));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private void requestSyncFromPeer(Long docId, WebSocketSession joiner) {
+        Set<WebSocketSession> sessions = docRooms.get(docId);
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
+        Long requesterId = (Long) joiner.getAttributes().get("userId");
+        if (requesterId == null) {
+            return;
+        }
+        for (WebSocketSession session : sessions) {
+            if (session.getId().equals(joiner.getId()) || !session.isOpen()) {
+                continue;
+            }
+            WsMessage request = new WsMessage();
+            request.setType("sync_request");
+            request.setDocId(docId);
+            request.setSenderId(requesterId);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("requesterId", requesterId);
+            request.setPayload(payload);
+            request.setTimestamp(System.currentTimeMillis());
+            sendMessage(session, request);
+            break;
+        }
     }
 
     private void handleChatMessage(WebSocketSession session, WsMessage message) {

@@ -3,7 +3,6 @@ package com.example.collab.controller;
 import com.example.collab.common.ApiResponse;
 import com.example.collab.dto.AclGrantRequest;
 import com.example.collab.entity.DocPermission;
-import com.example.collab.entity.DocumentAcl;
 import com.example.collab.security.SecurityUtil;
 import com.example.collab.service.AclService;
 import com.example.collab.service.NotificationService;
@@ -29,10 +28,10 @@ public class AclController {
     }
 
     @GetMapping
-    public ApiResponse<List<DocumentAcl>> list(@PathVariable("docId") Long docId) {
+    public ApiResponse<List<Map<String, Object>>> list(@PathVariable("docId") Long docId) {
         Long userId = SecurityUtil.getCurrentUserId();
         aclService.assertPermission(docId, userId, DocPermission.ADMIN, SecurityUtil.isAdmin());
-        return ApiResponse.ok(aclService.list(docId));
+        return ApiResponse.ok(aclService.listDetail(docId));
     }
 
     @PostMapping

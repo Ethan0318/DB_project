@@ -89,6 +89,11 @@
           >
             <el-table-column type="selection" width="45" />
             <el-table-column prop="title" label="Title" />
+            <el-table-column prop="ownerName" label="Author" width="160">
+              <template #default="scope">
+                {{ formatOwner(scope.row) }}
+              </template>
+            </el-table-column>
             <el-table-column prop="updatedAt" label="Updated" width="180">
               <template #default="scope">
                 {{ formatTime(scope.row.updatedAt) }}
@@ -99,10 +104,19 @@
                 {{ tagName(scope.row.tagId) }}
               </template>
             </el-table-column>
-            <el-table-column label="Actions" width="200">
+            <el-table-column label="Actions" width="240">
               <template #default="scope">
                 <el-button size="small" @click="openDoc(scope.row.id)">Open</el-button>
                 <el-button size="small" text @click="exportSingle(scope.row.id, 'html')">Export</el-button>
+                <el-button
+                  v-if="canDelete(scope.row)"
+                  size="small"
+                  text
+                  type="danger"
+                  @click="deleteDoc(scope.row.id)"
+                >
+                  Delete
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -122,15 +136,29 @@
               >
                 <el-table-column type="selection" width="45" />
                 <el-table-column prop="title" label="Title" />
+                <el-table-column prop="ownerName" label="Author" width="140">
+                  <template #default="scope">
+                    {{ formatOwner(scope.row) }}
+                  </template>
+                </el-table-column>
                 <el-table-column prop="updatedAt" label="Updated" width="170">
                   <template #default="scope">
                     {{ formatTime(scope.row.updatedAt) }}
                   </template>
                 </el-table-column>
-                <el-table-column label="Actions" width="160">
+                <el-table-column label="Actions" width="220">
                   <template #default="scope">
                     <el-button size="small" @click="openDoc(scope.row.id)">Open</el-button>
                     <el-button size="small" text @click="exportSingle(scope.row.id, 'html')">Export</el-button>
+                    <el-button
+                      v-if="canDelete(scope.row)"
+                      size="small"
+                      text
+                      type="danger"
+                      @click="deleteDoc(scope.row.id)"
+                    >
+                      Delete
+                    </el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -211,6 +239,7 @@ import { useRouter } from 'vue-router'
 import http from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notification'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -349,6 +378,14 @@ const tagName = (tagId?: number) => {
 
 const formatTime = (raw: string) => (raw ? new Date(raw).toLocaleString() : '')
 
+const formatOwner = (row: any) => {
+  if (row.ownerName) return row.ownerName
+  if (row.ownerEmail) return row.ownerEmail
+  return row.ownerId ? `User${row.ownerId}` : '-'
+}
+
+const canDelete = (row: any) => auth.isAdmin || row.ownerId === auth.user?.id
+
 const logout = () => {
   auth.logout()
   router.push('/login')
@@ -398,6 +435,21 @@ const exportSingle = async (id: number, format: 'html' | 'markdown') => {
     responseType: 'blob'
   })
   downloadBlob(data, `doc_${id}.${format === 'markdown' ? 'md' : 'html'}`)
+}
+
+const deleteDoc = async (id: number) => {
+  try {
+    await ElMessageBox.confirm('Delete this document?', 'Confirm', {
+      type: 'warning',
+      confirmButtonText: 'Delete',
+      cancelButtonText: 'Cancel'
+    })
+    await http.delete(`/api/docs/${id}`)
+    ElMessage.success('Deleted')
+    await loadDocs()
+  } catch (err) {
+    // canceled
+  }
 }
 
 const batchExport = async () => {

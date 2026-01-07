@@ -50,6 +50,16 @@
           <template #default="scope">{{ formatTime(scope.row.createdAt) }}</template>
         </el-table-column>
       </el-table>
+
+      <h3 style="margin-top: 16px;">Operation Logs</h3>
+      <el-table :data="opLogs" style="width: 100%">
+        <el-table-column prop="userId" label="User" width="120" />
+        <el-table-column prop="action" label="Action" width="160" />
+        <el-table-column prop="detail" label="Detail" />
+        <el-table-column prop="createdAt" label="Time" width="200">
+          <template #default="scope">{{ formatTime(scope.row.createdAt) }}</template>
+        </el-table-column>
+      </el-table>
     </div>
   </div>
 </template>
@@ -64,6 +74,7 @@ const router = useRouter()
 const users = ref<any[]>([])
 const analytics = reactive<any>({})
 const surveyResponses = ref<any[]>([])
+const opLogs = ref<any[]>([])
 const userRole = reactive<Record<number, string>>({})
 
 const loadUsers = async () => {
@@ -82,6 +93,11 @@ const loadAnalytics = async () => {
 const loadSurvey = async () => {
   const { data } = await http.get('/api/admin/survey')
   surveyResponses.value = data.data || []
+}
+
+const loadLogs = async () => {
+  const { data } = await http.get('/api/admin/oplogs', { params: { limit: 200 } })
+  opLogs.value = data.data || []
 }
 
 const updateRole = async (userId: number, role: string) => {
@@ -105,6 +121,7 @@ onMounted(async () => {
   await loadUsers()
   await loadAnalytics()
   await loadSurvey()
+  await loadLogs()
 })
 </script>
 

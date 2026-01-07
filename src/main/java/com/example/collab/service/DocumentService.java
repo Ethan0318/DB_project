@@ -12,11 +12,15 @@ import com.example.collab.entity.DocumentAcl;
 import com.example.collab.entity.DocumentContent;
 import com.example.collab.entity.DocumentSnapshot;
 import com.example.collab.entity.DocumentTemplate;
+import com.example.collab.entity.User;
+import com.example.collab.entity.UserProfile;
 import com.example.collab.mapper.DocumentAclMapper;
 import com.example.collab.mapper.DocumentContentMapper;
 import com.example.collab.mapper.DocumentMapper;
 import com.example.collab.mapper.DocumentSnapshotMapper;
 import com.example.collab.mapper.DocumentTemplateMapper;
+import com.example.collab.mapper.UserMapper;
+import com.example.collab.mapper.UserProfileMapper;
 import com.example.collab.util.HtmlUtil;
 import com.example.collab.service.NotificationService;
 import org.springframework.stereotype.Service;
@@ -41,6 +45,8 @@ public class DocumentService {
     private final DocumentAclMapper documentAclMapper;
     private final DocumentSnapshotMapper documentSnapshotMapper;
     private final DocumentTemplateMapper documentTemplateMapper;
+    private final UserMapper userMapper;
+    private final UserProfileMapper userProfileMapper;
     private final OpLogService opLogService;
     private final NotificationService notificationService;
 
@@ -49,6 +55,8 @@ public class DocumentService {
                            DocumentAclMapper documentAclMapper,
                            DocumentSnapshotMapper documentSnapshotMapper,
                            DocumentTemplateMapper documentTemplateMapper,
+                           UserMapper userMapper,
+                           UserProfileMapper userProfileMapper,
                            OpLogService opLogService,
                            NotificationService notificationService) {
         this.documentMapper = documentMapper;
@@ -56,6 +64,8 @@ public class DocumentService {
         this.documentAclMapper = documentAclMapper;
         this.documentSnapshotMapper = documentSnapshotMapper;
         this.documentTemplateMapper = documentTemplateMapper;
+        this.userMapper = userMapper;
+        this.userProfileMapper = userProfileMapper;
         this.opLogService = opLogService;
         this.notificationService = notificationService;
     }
@@ -128,6 +138,38 @@ public class DocumentService {
             wrapper.orderByDesc("updated_at");
         }
         return documentMapper.selectList(wrapper);
+    }
+
+    public List<Map<String, Object>> listDocSummaries(Long userId, boolean isAdmin, String keyword, Long tagId, String sort,
+                                                      Long authorId, String fromDate, String toDate) {
+        List<Document> docs = listDocs(userId, isAdmin, keyword, tagId, sort, authorId, fromDate, toDate);
+        if (docs.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> ownerIds = docs.stream().map(Document::getOwnerId).filter(id -> id != null).collect(HashSet::new, Set::add, Set::addAll);
+        Map<Long, User> userMap = ownerIds.isEmpty() ? Map.of()
+                : userMapper.selectBatchIds(ownerIds).stream().collect(java.util.stream.Collectors.toMap(User::getId, u -> u));
+        Map<Long, UserProfile> profileMap = ownerIds.isEmpty() ? Map.of()
+                : userProfileMapper.selectList(new QueryWrapper<UserProfile>().in("user_id", ownerIds)).stream()
+                .collect(java.util.stream.Collectors.toMap(UserProfile::getUserId, p -> p));
+        return docs.stream().map(doc -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", doc.getId());
+            map.put("title", doc.getTitle());
+            map.put("ownerId", doc.getOwnerId());
+            map.put("tagId", doc.getTagId());
+            map.put("status", doc.getStatus());
+            map.put("createdAt", doc.getCreatedAt());
+            map.put("updatedAt", doc.getUpdatedAt());
+            User owner = doc.getOwnerId() == null ? null : userMap.get(doc.getOwnerId());
+            UserProfile profile = doc.getOwnerId() == null ? null : profileMap.get(doc.getOwnerId());
+            String ownerName = profile != null && profile.getNickname() != null && !profile.getNickname().isBlank()
+                    ? profile.getNickname()
+                    : owner != null ? owner.getEmail() : null;
+            map.put("ownerName", ownerName);
+            map.put("ownerEmail", owner != null ? owner.getEmail() : null);
+            return map;
+        }).toList();
     }
 
     public Map<String, Object> getDoc(Long docId) {

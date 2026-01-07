@@ -45,15 +45,15 @@ public class DocumentController {
     }
 
     @GetMapping
-    public ApiResponse<List<Document>> list(@RequestParam(value = "keyword", required = false) String keyword,
-                                            @RequestParam(value = "tagId", required = false) Long tagId,
-                                            @RequestParam(value = "sort", required = false) String sort,
-                                            @RequestParam(value = "authorId", required = false) Long authorId,
-                                            @RequestParam(value = "fromDate", required = false) String fromDate,
-                                            @RequestParam(value = "toDate", required = false) String toDate) {
+    public ApiResponse<List<Map<String, Object>>> list(@RequestParam(value = "keyword", required = false) String keyword,
+                                                       @RequestParam(value = "tagId", required = false) Long tagId,
+                                                       @RequestParam(value = "sort", required = false) String sort,
+                                                       @RequestParam(value = "authorId", required = false) Long authorId,
+                                                       @RequestParam(value = "fromDate", required = false) String fromDate,
+                                                       @RequestParam(value = "toDate", required = false) String toDate) {
         Long userId = SecurityUtil.getCurrentUserId();
         boolean isAdmin = SecurityUtil.isAdmin();
-        return ApiResponse.ok(documentService.listDocs(userId, isAdmin, keyword, tagId, sort, authorId, fromDate, toDate));
+        return ApiResponse.ok(documentService.listDocSummaries(userId, isAdmin, keyword, tagId, sort, authorId, fromDate, toDate));
     }
 
     @GetMapping("/{id}")

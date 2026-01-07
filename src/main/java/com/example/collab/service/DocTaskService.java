@@ -68,14 +68,22 @@ public class DocTaskService {
         }
         task.setUpdatedAt(LocalDateTime.now());
         taskMapper.updateById(task);
-        if (task.getAssigneeId() != null && !task.getAssigneeId().equals(oldAssignee)) {
-            notificationService.notifyUser(task.getAssigneeId(), "TASK_ASSIGN",
+        Long assigneeId = task.getAssigneeId();
+        Long creatorId = task.getCreatedBy();
+        if (assigneeId != null && !assigneeId.equals(oldAssignee)) {
+            notificationService.notifyUser(assigneeId, "TASK_ASSIGN",
                     "{\"docId\":" + docId + ",\"taskId\":" + task.getId() + "}");
         }
-        if (!oldStatus.equals(task.getStatus()) && "DONE".equalsIgnoreCase(task.getStatus())
-                && task.getAssigneeId() != null && !task.getAssigneeId().equals(operatorId)) {
-            notificationService.notifyUser(task.getAssigneeId(), "TASK_DONE",
-                    "{\"docId\":" + docId + ",\"taskId\":" + task.getId() + "}");
+        if (!oldStatus.equals(task.getStatus()) && "DONE".equalsIgnoreCase(task.getStatus())) {
+            if (assigneeId != null && !assigneeId.equals(operatorId)) {
+                notificationService.notifyUser(assigneeId, "TASK_DONE",
+                        "{\"docId\":" + docId + ",\"taskId\":" + task.getId() + "}");
+            }
+            if (creatorId != null && !creatorId.equals(operatorId)
+                    && (assigneeId == null || !creatorId.equals(assigneeId))) {
+                notificationService.notifyUser(creatorId, "TASK_DONE",
+                        "{\"docId\":" + docId + ",\"taskId\":" + task.getId() + "}");
+            }
         }
         return task;
     }
